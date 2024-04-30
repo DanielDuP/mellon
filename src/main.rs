@@ -92,8 +92,7 @@ async fn auth(req: HttpRequest, token_store: web::Data<Arc<TokenStore>>) -> impl
     let auth_header = req.headers().get("Authorization");
     if let Some(header_value) = auth_header {
         if let Ok(str_value) = header_value.to_str() {
-            if str_value.starts_with("Bearer ") {
-                let token = &str_value["Bearer ".len()..];
+            if let Some(token) = str_value.strip_prefix("Bearer ") {
                 if token_store.contains_token(token).unwrap() {
                     return HttpResponse::Ok().body("Authorized");
                 } else {
@@ -140,8 +139,7 @@ fn add_token(mut token_store: TokenStore, label: String) {
             return;
         }
     };
-    println!("Success, new token generated for \"{}\".", label);
-    println!("Speak [[ {} ]] and enter.", new_token.1);
+    println!("{}", new_token.1);
 }
 
 fn list_tokens(token_store: TokenStore) {
