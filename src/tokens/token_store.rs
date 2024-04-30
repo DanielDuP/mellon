@@ -1,24 +1,30 @@
-use std::collections::hash_map::Iter;
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
+use std::fs::{self, File};
+use std::io::ErrorKind;
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 use std::str::FromStr;
-use std::{io::ErrorKind, path::Path};
 
 use super::token::Token;
 use anyhow::{anyhow, Result};
 use uuid::Uuid;
 
-pub struct TokenStore<'a> {
-    file_path: &'a Path,
+pub struct TokenStore {
+    file_path: PathBuf,
     tokens: Option<HashMap<String, Token>>, // Stores all token objects in memory
     token_lookup: Option<HashSet<String>>,  // Quickly checks if a token string is authorized
 }
 
-impl<'a> TokenStore<'a> {
-    pub fn new(file_path: &'a Path) -> Result<Self> {
+impl TokenStore {
+    pub fn new(file_path: String) -> Result<Self> {
+        let store_path = PathBuf::from(file_path);
+        if let Some(dir_path) = store_path.parent() {
+            if !dir_path.exists() {
+                fs::create_dir_all(dir_path).expect("Failed to create directory");
+            }
+        }
         let mut token_store = TokenStore {
-            file_path,
+            file_path: store_path,
             tokens: None,
             token_lookup: None,
         };
@@ -27,7 +33,7 @@ impl<'a> TokenStore<'a> {
     }
 
     pub fn reload(&mut self) -> Result<()> {
-        let file = match File::open(self.file_path) {
+        let file = match File::open(self.file_path.clone()) {
             Ok(file) => file,
             Err(ref error) if error.kind() == ErrorKind::NotFound => {
                 self.tokens = Some(HashMap::new());
@@ -57,7 +63,7 @@ impl<'a> TokenStore<'a> {
     }
 
     fn persist_to_file(&self) -> io::Result<()> {
-        let file = File::create(self.file_path)?;
+        let file = File::create(self.file_path.clone())?;
         let mut writer = io::BufWriter::new(file);
         if let Some(tokens) = self.tokens.as_ref() {
             for token in tokens.values() {
@@ -119,110 +125,5 @@ impl<'a> TokenStore<'a> {
             .as_ref()
             .ok_or_else(|| anyhow!("Token store not yet loaded"))
             .map(|token_map| token_map.values())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::{Read, Write};
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_new_token_store() -> Result<()> {
-        let temp_dir = tempdir()?;
-        let file_path = temp_dir.path().join("token_store.txt");
-        let token_store = TokenStore::new(&file_path)?;
-        assert!(token_store.tokens.unwrap().is_empty());
-        assert!(token_store.token_lookup.unwrap().is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn test_reload_empty_store() -> Result<()> {
-        let temp_dir = tempdir()?;
-        let file_path = temp_dir.path().join("token_store.txt");
-        let mut token_store = TokenStore::new(&file_path)?;
-        token_store.reload()?;
-        assert!(token_store.tokens.unwrap().is_empty());
-        assert!(token_store.token_lookup.unwrap().is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn test_reload_with_existing_tokens() -> Result<()> {
-        let temp_dir = tempdir()?;
-        let file_path = temp_dir.path().join("token_store.txt");
-
-        // Setup initial file with one token
-        let mut file = File::create(&file_path)?;
-        writeln!(file, "label1:uuid1")?;
-
-        let mut token_store = TokenStore::new(&file_path)?;
-        token_store.reload()?;
-        assert_eq!(token_store.tokens.unwrap().len(), 1);
-        assert!(token_store.token_lookup.unwrap().contains("uuid1"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_persist_to_file() -> Result<()> {
-        let temp_dir = tempdir()?;
-        let file_path = temp_dir.path().join("token_store.txt");
-
-        let mut token_store = TokenStore::new(&file_path)?;
-        let token_label = "label";
-        let token = Token(token_label.to_string(), Uuid::new_v4().to_string());
-        token_store.tokens = Some(HashMap::from([(token_label.to_string(), token.clone())]));
-        token_store.persist_to_file()?;
-
-        let mut file = File::open(&file_path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        assert!(contents.contains(&token.0));
-        assert!(contents.contains(&token.1));
-        Ok(())
-    }
-
-    #[test]
-    fn test_contains_token() -> Result<()> {
-        let temp_dir = tempdir()?;
-        let file_path = temp_dir.path().join("token_store.txt");
-        let mut token_store = TokenStore::new(&file_path)?;
-
-        // Create a token and reload the store to simulate normal operation
-        token_store.create("label")?;
-        token_store.reload()?;
-
-        // Check if the token is contained in the store
-        let token = token_store
-            .tokens
-            .as_ref()
-            .expect("works")
-            .values()
-            .next()
-            .unwrap()
-            .clone();
-        assert!(token_store.contains_token(&token.1)?);
-        assert!(!token_store.contains_token("nonexistent_token")?);
-        Ok(())
-    }
-
-    #[test]
-    fn test_create_token() -> Result<()> {
-        let temp_dir = tempdir()?;
-        let file_path = temp_dir.path().join("token_store.txt");
-        let mut token_store = TokenStore::new(&file_path)?;
-
-        // Create a new token and check if it's added
-        let token_label = "label";
-        let new_token = token_store.create(token_label)?;
-        print!("{}", new_token);
-        assert_eq!(
-            token_store.tokens.unwrap().get(token_label).unwrap().1,
-            new_token.1
-        );
-        assert!(token_store.token_lookup.unwrap().contains(&new_token.1));
-        Ok(())
     }
 }

@@ -1,12 +1,12 @@
-use std::path::Path;
+use std::sync::Arc;
 
-use tokens::token_store::{self, TokenStore};
+use tokens::token_store::TokenStore;
 
 mod tokens;
 
 use clap::{Parser, Subcommand};
-use std::fs;
 
+use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use prettytable::{row, Cell, Row, Table};
 
 #[derive(Parser)]
@@ -60,13 +60,7 @@ enum TokenCommands {
 }
 
 fn main() {
-    let store_path = Path::new(STORE_FILE_PATH);
-    if let Some(dir_path) = store_path.parent() {
-        if !dir_path.exists() {
-            fs::create_dir_all(dir_path).expect("Failed to create directory");
-        }
-    }
-    let token_store = match TokenStore::new(store_path) {
+    let token_store = match TokenStore::new(STORE_FILE_PATH.to_string()) {
         Ok(store) => store,
         Err(_) => {
             println!("Failed to instantiate token store");
@@ -75,13 +69,55 @@ fn main() {
     };
     let args = Cli::parse();
     match args.command {
-        Commands::Serve { host } => todo!(),
+        Commands::Serve { host } => match host {
+            Some(host) => {
+                println!("Server starting up on {}", host);
+                match serve(host.as_str(), token_store) {
+                    Ok(_) => println!("Server shut down!"),
+                    Err(err) => println!("Failed to host server: {}", err),
+                }
+            }
+            None => println!("Host is not defined properly!"),
+        },
         Commands::Token { action } => match action {
             TokenCommands::Add { token_label } => add_token(token_store, token_label),
             TokenCommands::Rescind { token_label } => rescind_token(token_store, token_label),
             TokenCommands::List {} => list_tokens(token_store),
         },
     }
+}
+
+#[get("/auth")]
+async fn auth(req: HttpRequest, token_store: web::Data<Arc<TokenStore>>) -> impl Responder {
+    let auth_header = req.headers().get("Authorization");
+    if let Some(header_value) = auth_header {
+        if let Ok(str_value) = header_value.to_str() {
+            if str_value.starts_with("Bearer ") {
+                let token = &str_value["Bearer ".len()..];
+                if token_store.contains_token(token).unwrap() {
+                    return HttpResponse::Ok().body("Authorized");
+                } else {
+                    println!("Refused access to token {}", token);
+                }
+            }
+        }
+    }
+
+    HttpResponse::Unauthorized().body("Unauthorized")
+}
+
+#[actix_web::main]
+async fn serve(host: &str, token_store: TokenStore) -> std::io::Result<()> {
+    let token_store = Arc::new(token_store);
+    let server = HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::new(token_store.clone()))
+            .service(auth)
+    })
+    .bind(host)?
+    .run();
+
+    server.await
 }
 
 fn rescind_token(mut token_store: TokenStore, label: String) {
