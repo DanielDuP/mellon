@@ -66,11 +66,11 @@ impl MellonServer {
             // i.e. we have found the auth token from the headers
             // now we just test it against the token store
             Some(auth_token) => match self.token_store.contains_token(&auth_token)? {
-                true => self.respond(stream, HttpResponse::Ok),
-                false => self.respond(stream, HttpResponse::Unauthorised),
+                true => self.respond(stream, HttpResponse::Ok)?,
+                false => self.respond(stream, HttpResponse::Unauthorised)?,
             },
             // No auth token obviously means request cannot be authorized
-            None => self.respond(stream, HttpResponse::Unauthorised),
+            None => self.respond(stream, HttpResponse::Unauthorised)?,
         }
         Ok(())
     }
@@ -98,12 +98,9 @@ impl MellonServer {
         Ok(None)
     }
 
-    fn respond(&self, mut stream: TcpStream, response: HttpResponse) {
-        match stream.write_all(response.as_bytes()) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("Failed to write response to stream: {}", e);
-            }
-        }
+    fn respond(&self, mut stream: TcpStream, response: HttpResponse) -> Result<()> {
+        stream.set_write_timeout(Some(Duration::from_secs(30)))?;
+        stream.write_all(response.as_bytes())?;
+        Ok(())
     }
 }
