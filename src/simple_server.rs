@@ -9,6 +9,7 @@ use std::{
 enum HttpResponse {
     Ok,
     Unauthorised,
+    ServerError,
 }
 
 impl HttpResponse {
@@ -16,6 +17,7 @@ impl HttpResponse {
         match self {
             HttpResponse::Ok => "HTTP/1.1 200 OK\r\n\r\n",
             HttpResponse::Unauthorised => "HTTP/1.1 401 UNAUTHORISED\r\n\r\n",
+            HttpResponse::ServerError => "HTTP/1.1 500 INTERNAL SERVER ERROR\r\n\r\n",
         }
     }
 
@@ -60,14 +62,24 @@ impl MellonServer {
 
     fn serve_connection(&self, stream: TcpStream) -> Result<()> {
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
-        let auth_token = self.extract_auth_token(&stream)?;
+        let auth_token = self.extract_auth_token(&stream);
+        if let Err(e) = auth_token {
+            self.respond(stream, HttpResponse::ServerError)?;
+            return Err(e);
+        }
         // if no auth header, cannot be valid
-        match auth_token {
+        match auth_token? {
             // i.e. we have found the auth token from the headers
             // now we just test it against the token store
-            Some(auth_token) => match self.token_store.contains_token(&auth_token)? {
-                true => self.respond(stream, HttpResponse::Ok)?,
-                false => self.respond(stream, HttpResponse::Unauthorised)?,
+            Some(auth_token) => match self.token_store.contains_token(&auth_token) {
+                Ok(result) => match result {
+                    true => self.respond(stream, HttpResponse::Ok)?,
+                    false => self.respond(stream, HttpResponse::Unauthorised)?,
+                },
+                Err(e) => {
+                    self.respond(stream, HttpResponse::ServerError)?;
+                    return Err(e);
+                }
             },
             // No auth token obviously means request cannot be authorized
             None => self.respond(stream, HttpResponse::Unauthorised)?,
