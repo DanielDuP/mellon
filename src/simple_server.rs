@@ -3,6 +3,7 @@ use anyhow::Result;
 use std::{
     io::{prelude::*, BufReader},
     net::{TcpListener, TcpStream},
+    time::Duration,
 };
 
 enum HttpResponse {
@@ -48,35 +49,53 @@ impl MellonServer {
 
         for stream in listener.incoming() {
             match stream {
-                Ok(stream) => self.serve_connection(stream),
+                Ok(stream) => self
+                    .serve_connection(stream)
+                    .unwrap_or_else(|e| eprintln!("Failed to serve request {}", e)),
                 Err(e) => eprintln!("Error accepting connection: {}", e),
             }
         }
         Ok(())
     }
 
-    fn serve_connection(&self, stream: TcpStream) {
-        let auth_token = self.extract_auth_token(&stream);
+    fn serve_connection(&self, stream: TcpStream) -> Result<()> {
+        stream.set_read_timeout(Some(Duration::from_secs(30)))?;
+        let auth_token = self.extract_auth_token(&stream)?;
         // if no auth header, cannot be valid
         match auth_token {
-            Some(auth_token) => match self.token_store.contains_token(&auth_token) {
-                Ok(result) => match result {
-                    true => self.respond(stream, HttpResponse::Ok),
-                    false => self.respond(stream, HttpResponse::Unauthorised),
-                },
-                Err(e) => eprintln!("Failed to serve connection: {}", e),
+            // i.e. we have found the auth token from the headers
+            // now we just test it against the token store
+            Some(auth_token) => match self.token_store.contains_token(&auth_token)? {
+                true => self.respond(stream, HttpResponse::Ok),
+                false => self.respond(stream, HttpResponse::Unauthorised),
             },
+            // No auth token obviously means request cannot be authorized
             None => self.respond(stream, HttpResponse::Unauthorised),
         }
+        Ok(())
     }
 
-    fn extract_auth_token(&self, mut stream: &TcpStream) -> Option<String> {
-        let buf_reader = BufReader::new(&mut stream);
-        buf_reader
-            .lines()
-            .map(|result| result.unwrap())
-            .find(|line| line.starts_with("Authorization: Bearer"))
-            .map(|line| line["Authorization: Bearer ".len()..].to_string())
+    fn extract_auth_token(&self, stream: &TcpStream) -> Result<Option<String>> {
+        let buf_reader = BufReader::new(stream);
+        for line in buf_reader.lines() {
+            match line {
+                Ok(line) => {
+                    if let Some(token) = line.strip_prefix("Authorization: Bearer ") {
+                        return Ok(Some(token.to_string()));
+                    }
+                    if line.is_empty() {
+                        break;
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                    return Err(anyhow::anyhow!(
+                        "Connection timed out while reading headers"
+                    ));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(None)
     }
 
     fn respond(&self, mut stream: TcpStream, response: HttpResponse) {
