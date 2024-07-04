@@ -12,7 +12,7 @@ Apache and NGINX to guard access to processes lacking specific auth mechanisms o
 ## Disclaimer
 
 Mellon is designed (barely) for serving a very unique and specific use case - namely gating access to another web-based service
-which has not authentication whatsoever and where it would prove impractical, tiresome or boring to implement said security mechanisms
+which has no authentication whatsoever and where it would prove impractical, tiresome or boring to implement said security mechanisms
 in that service itself.
 Mellon is designed to be used in conjunction with a reverse proxy or similar and will be of no use on its own.
 
