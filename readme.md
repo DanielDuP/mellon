@@ -1,7 +1,5 @@
 # Mellon
 
-## Introduction
-
 Mellon is a straightforward, Rust-based authentication server that takes its
 inspiration from the iconic riddle on the Doors of Durin
 in J.R.R. Tolkien's "The Lord of the Rings."
