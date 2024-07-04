@@ -1,12 +1,11 @@
-use std::sync::Arc;
-
+use simple_server::MellonServer;
 use tokens::token_store::TokenStore;
 
+mod simple_server;
 mod tokens;
 
 use clap::{Parser, Subcommand};
 
-use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use prettytable::{row, Cell, Row, Table};
 
 #[derive(Parser)]
@@ -72,7 +71,7 @@ fn main() {
         Commands::Serve { host } => match host {
             Some(host) => {
                 println!("Server starting up on {}", host);
-                match serve(host.as_str(), token_store) {
+                match MellonServer::serve(host, token_store) {
                     Ok(_) => println!("Server shut down!"),
                     Err(err) => println!("Failed to host server: {}", err),
                 }
@@ -85,38 +84,6 @@ fn main() {
             TokenCommands::List {} => list_tokens(token_store),
         },
     }
-}
-
-#[get("/auth")]
-async fn auth(req: HttpRequest, token_store: web::Data<Arc<TokenStore>>) -> impl Responder {
-    let auth_header = req.headers().get("Authorization");
-    if let Some(header_value) = auth_header {
-        if let Ok(str_value) = header_value.to_str() {
-            if let Some(token) = str_value.strip_prefix("Bearer ") {
-                if token_store.contains_token(token).unwrap() {
-                    return HttpResponse::Ok().body("Authorized");
-                } else {
-                    println!("Refused access to token {}", token);
-                }
-            }
-        }
-    }
-
-    HttpResponse::Unauthorized().body("Unauthorized")
-}
-
-#[actix_web::main]
-async fn serve(host: &str, token_store: TokenStore) -> std::io::Result<()> {
-    let token_store = Arc::new(token_store);
-    let server = HttpServer::new(move || {
-        App::new()
-            .app_data(web::Data::new(token_store.clone()))
-            .service(auth)
-    })
-    .bind(host)?
-    .run();
-
-    server.await
 }
 
 fn rescind_token(mut token_store: TokenStore, label: String) {
@@ -163,7 +130,7 @@ fn list_tokens(token_store: TokenStore) {
     }
 }
 
-const STORE_FILE_PATH: &str = "/tmp/token_test";
+const STORE_FILE_PATH: &str = "/tmp/mellon/tokens";
 
 const THE_DOORS_OF_DURIN: &str = r#"
 

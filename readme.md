@@ -8,8 +8,8 @@ in J.R.R. Tolkien's "The Lord of the Rings."
 
 Simply speak your bearer token and enter.
 
-It can be configured to work with Apache or
-NGINX to guard access to processes lacking specific auth mechanisms of their own.
+It can be configured to work with standalone webservers, such as
+Apache and NGINX to guard access to processes lacking specific auth mechanisms of their own.
 
 ## Disclaimer
 
